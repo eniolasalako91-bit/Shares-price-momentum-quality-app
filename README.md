@@ -12,6 +12,9 @@ A fast MVP for screening shares using:
 - Multi-timeframe returns
 - Alpha vs benchmark
 - Win rate
+- Beta vs benchmark
+- Sharpe ratio
+- Annualized volatility
 - News sentiment score
 
 ## Run locally
@@ -26,9 +29,17 @@ streamlit run app.py
 ## Files
 
 - `app.py` — Streamlit user interface
-- `scoring.py` — all calculations and scoring logic
+- `scoring.py` — all calculations and scoring logic, including beta and Sharpe ratio
 - `sample_data.py` — realistic sample stock universe
 - `requirements.txt` — dependencies
+- `Momentum_Quality_App_MVP.ipynb` — notebook version for GitHub preview
+
+## Key formulas
+
+- Beta = covariance(stock daily returns, benchmark daily returns) / variance(benchmark daily returns)
+- Sharpe ratio = annualized excess return / annualized volatility
+- Alpha = stock return - benchmark return
+- Relative volume = latest volume / 30-day average volume
 
 ## Next development step
 

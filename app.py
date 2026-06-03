@@ -9,7 +9,7 @@ from scoring import compute_metrics
 st.set_page_config(page_title="Momentum Quality Scanner", layout="wide")
 
 st.title("Momentum Quality Scanner")
-st.caption("Find shares with technical momentum, strong volume, improving fundamentals, positive alpha, and supportive sentiment.")
+st.caption("Find shares with technical momentum, strong volume, improving fundamentals, positive alpha, controlled beta risk, Sharpe quality, and supportive sentiment.")
 
 with st.sidebar:
     st.header("User Parameters")
@@ -22,8 +22,12 @@ with st.sidebar:
     require_positive_equity = st.checkbox("Require positive shareholder equity", value=True)
     require_rising_equity = st.checkbox("Require rising shareholder equity", value=False)
     min_alpha = st.slider("Minimum 1-year alpha vs benchmark (%)", -100.0, 200.0, 0.0, 1.0)
+    min_beta, max_beta = st.slider("Acceptable beta range", -1.0, 5.0, (0.5, 2.5), 0.1)
+    min_sharpe = st.slider("Minimum 1-year Sharpe ratio", -3.0, 5.0, 0.0, 0.1)
+    max_volatility = st.slider("Maximum annualized volatility (%)", 5.0, 200.0, 120.0, 1.0)
     min_score = st.slider("Minimum Momentum Quality Score", 0, 100, 60)
     rsi_min, rsi_max = st.slider("Acceptable RSI range", 0, 100, (45, 85))
+    risk_free_rate = st.slider("Risk-free rate for Sharpe calculation (%)", 0.0, 10.0, 4.0, 0.25) / 100
 
 universe, benchmark = load_sample_universe()
 rows = []
@@ -36,6 +40,7 @@ for symbol, data in universe.items():
             benchmark_prices=benchmark,
             fundamentals=data["fundamentals"],
             sentiment_score=data["sentiment_score"],
+            risk_free_rate=risk_free_rate,
         )
     )
 
@@ -46,6 +51,9 @@ filtered = filtered[filtered["consecutive_up_days"] >= min_up_days]
 filtered = filtered[filtered["gap_to_52w_high_pct"] <= max_gap]
 filtered = filtered[filtered["relative_volume"] >= min_rel_volume]
 filtered = filtered[filtered["alpha_1Y"] >= min_alpha]
+filtered = filtered[filtered["beta_1Y"].between(min_beta, max_beta)]
+filtered = filtered[filtered["sharpe_1Y"] >= min_sharpe]
+filtered = filtered[filtered["volatility_1Y_pct"] <= max_volatility]
 filtered = filtered[filtered["momentum_quality_score"] >= min_score]
 filtered = filtered[(filtered["rsi"] >= rsi_min) & (filtered["rsi"] <= rsi_max)]
 
@@ -65,49 +73,66 @@ filtered = filtered.sort_values("momentum_quality_score", ascending=False)
 summary_cols = [
     "symbol", "company", "momentum_quality_score", "consecutive_up_days",
     "latest_price", "high_52w", "gap_to_52w_high_pct", "relative_volume",
-    "rsi", "eps", "eps_growth_pct", "pe_ratio", "equity_growth_pct",
+    "rsi", "beta_1Y", "sharpe_1Y", "volatility_1Y_pct",
+    "eps", "eps_growth_pct", "pe_ratio", "equity_growth_pct",
     "return_5D", "return_1M", "return_3M", "return_1Y", "alpha_1Y",
     "win_rate_252D", "sentiment_score"
 ]
 
+format_map = {
+    "momentum_quality_score": "{:.1f}",
+    "latest_price": "{:.2f}",
+    "high_52w": "{:.2f}",
+    "gap_to_52w_high_pct": "{:.2f}%",
+    "relative_volume": "{:.2f}x",
+    "rsi": "{:.1f}",
+    "beta_1Y": "{:.2f}",
+    "sharpe_1Y": "{:.2f}",
+    "volatility_1Y_pct": "{:.1f}%",
+    "eps": "{:.2f}",
+    "eps_growth_pct": "{:.1f}%",
+    "pe_ratio": "{:.1f}",
+    "equity_growth_pct": "{:.1f}%",
+    "return_5D": "{:.1f}%",
+    "return_1M": "{:.1f}%",
+    "return_3M": "{:.1f}%",
+    "return_1Y": "{:.1f}%",
+    "alpha_1Y": "{:.1f}%",
+    "win_rate_252D": "{:.1f}%",
+    "sentiment_score": "{:.2f}",
+}
+
 st.subheader("Ranked Matches")
 st.dataframe(
-    filtered[summary_cols].style.format({
-        "momentum_quality_score": "{:.1f}",
-        "latest_price": "{:.2f}",
-        "high_52w": "{:.2f}",
-        "gap_to_52w_high_pct": "{:.2f}%",
-        "relative_volume": "{:.2f}x",
-        "rsi": "{:.1f}",
-        "eps": "{:.2f}",
-        "eps_growth_pct": "{:.1f}%",
-        "pe_ratio": "{:.1f}",
-        "equity_growth_pct": "{:.1f}%",
-        "return_5D": "{:.1f}%",
-        "return_1M": "{:.1f}%",
-        "return_3M": "{:.1f}%",
-        "return_1Y": "{:.1f}%",
-        "alpha_1Y": "{:.1f}%",
-        "win_rate_252D": "{:.1f}%",
-        "sentiment_score": "{:.2f}",
-    }),
+    filtered[summary_cols].style.format(format_map),
     use_container_width=True,
     hide_index=True,
 )
 
 st.subheader("All Stocks Scored")
-st.dataframe(results[summary_cols].sort_values("momentum_quality_score", ascending=False), use_container_width=True, hide_index=True)
+st.dataframe(
+    results[summary_cols].sort_values("momentum_quality_score", ascending=False).style.format(format_map),
+    use_container_width=True,
+    hide_index=True,
+)
 
 st.subheader("Score Breakdown")
 selected = st.selectbox("Select a stock", results["symbol"].tolist())
 row = results[results["symbol"] == selected].iloc[0]
 score_cols = [
     "price_momentum_score", "volume_score", "high_gap_score", "rsi_score",
-    "fundamental_score", "equity_score", "alpha_quality_score", "sentiment_component_score"
+    "fundamental_score", "equity_score", "alpha_quality_score", "risk_quality_score",
+    "sentiment_component_score"
 ]
 st.bar_chart(row[score_cols])
 
 st.markdown("""
+### New risk-adjusted metrics included
+
+- **Beta**: measures how aggressively a stock moves compared with the benchmark. A beta around 1 moves like the market; above 1 is more volatile; below 1 is less volatile.
+- **Sharpe ratio**: measures return per unit of volatility. Higher is usually better.
+- **Annualized volatility**: measures how unstable the stock's returns have been over the last year.
+
 ### How to connect real data
 This MVP currently runs with sample data so you can test the product immediately.
 Replace `sample_data.py` with connectors for:

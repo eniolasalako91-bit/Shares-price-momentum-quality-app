@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -19,6 +17,8 @@ LOOKBACKS = {
     "9M": 189,
     "1Y": 252,
 }
+
+TRADING_DAYS = 252
 
 
 def pct_return(series: pd.Series, periods: int) -> float:
@@ -58,6 +58,41 @@ def win_rate(close: pd.Series, periods: int = 252) -> float:
     return (changes.gt(0).sum() / len(changes)) * 100
 
 
+def daily_returns(close: pd.Series) -> pd.Series:
+    return close.pct_change().dropna()
+
+
+def beta_vs_benchmark(close: pd.Series, benchmark_close: pd.Series, periods: int = 252) -> float:
+    """Beta = covariance(stock returns, benchmark returns) / variance(benchmark returns)."""
+    aligned = pd.concat(
+        [daily_returns(close).rename("stock"), daily_returns(benchmark_close).rename("benchmark")],
+        axis=1,
+    ).dropna().tail(periods)
+    if len(aligned) < 30:
+        return np.nan
+    benchmark_variance = aligned["benchmark"].var()
+    if benchmark_variance == 0 or np.isnan(benchmark_variance):
+        return np.nan
+    return float(aligned["stock"].cov(aligned["benchmark"]) / benchmark_variance)
+
+
+def annualized_volatility(close: pd.Series, periods: int = 252) -> float:
+    returns = daily_returns(close).tail(periods)
+    if len(returns) < 30:
+        return np.nan
+    return float(returns.std() * np.sqrt(TRADING_DAYS) * 100)
+
+
+def sharpe_ratio(close: pd.Series, risk_free_rate: float = 0.04, periods: int = 252) -> float:
+    """Annualized Sharpe ratio using daily returns and a default 4% risk-free rate."""
+    returns = daily_returns(close).tail(periods)
+    if len(returns) < 30 or returns.std() == 0:
+        return np.nan
+    daily_risk_free = risk_free_rate / TRADING_DAYS
+    excess_daily = returns - daily_risk_free
+    return float((excess_daily.mean() / returns.std()) * np.sqrt(TRADING_DAYS))
+
+
 def normalize(value: float, low: float, high: float, inverse: bool = False) -> float:
     if value is None or np.isnan(value):
         return 0.0
@@ -66,6 +101,23 @@ def normalize(value: float, low: float, high: float, inverse: bool = False) -> f
     score = (value - low) / (high - low) * 100
     score = max(0.0, min(100.0, score))
     return 100 - score if inverse else score
+
+
+def beta_score(beta_value: float) -> float:
+    """Reward useful momentum risk: not too defensive, not dangerously volatile."""
+    if beta_value is None or np.isnan(beta_value):
+        return 0.0
+    if 0.8 <= beta_value <= 1.8:
+        return 100.0
+    if 0.5 <= beta_value < 0.8:
+        return 75.0
+    if 1.8 < beta_value <= 2.5:
+        return 70.0
+    if 0.0 <= beta_value < 0.5:
+        return 45.0
+    if 2.5 < beta_value <= 3.5:
+        return 35.0
+    return 15.0
 
 
 def score_row(row: Dict) -> Dict:
@@ -84,17 +136,17 @@ def score_row(row: Dict) -> Dict:
 
     rsi_value = row.get("rsi", np.nan)
     if np.isnan(rsi_value):
-        rsi_score = 0
+        rsi_component = 0
     elif 55 <= rsi_value <= 75:
-        rsi_score = 100
+        rsi_component = 100
     elif 45 <= rsi_value < 55:
-        rsi_score = 65
+        rsi_component = 65
     elif 75 < rsi_value <= 85:
-        rsi_score = 70
+        rsi_component = 70
     elif rsi_value > 85:
-        rsi_score = 45
+        rsi_component = 45
     else:
-        rsi_score = 25
+        rsi_component = 25
 
     eps_score = 0
     if row.get("eps", np.nan) > 0:
@@ -114,38 +166,45 @@ def score_row(row: Dict) -> Dict:
 
     fundamentals = np.nanmean([eps_score, pe_score])
 
-    equity_score = 0
+    equity_component = 0
     if row.get("shareholder_equity", np.nan) > 0:
-        equity_score += 50
+        equity_component += 50
     if row.get("equity_growth_pct", np.nan) > 0:
-        equity_score += 50
+        equity_component += 50
 
-    alpha_score = normalize(row.get("alpha_252D", np.nan), -50, 100)
+    alpha_score = normalize(row.get("alpha_1Y", np.nan), -50, 100)
     winrate_score = normalize(row.get("win_rate_252D", np.nan), 40, 70)
     alpha_quality = np.nanmean([alpha_score, winrate_score])
 
-    sentiment_score = normalize(row.get("sentiment_score", 0), -1, 1)
+    beta_component = beta_score(row.get("beta_1Y", np.nan))
+    sharpe_component = normalize(row.get("sharpe_1Y", np.nan), -1, 3)
+    volatility_component = normalize(row.get("volatility_1Y_pct", np.nan), 20, 120, inverse=True)
+    risk_quality = np.nanmean([beta_component, sharpe_component, volatility_component])
+
+    sentiment_component = normalize(row.get("sentiment_score", 0), -1, 1)
 
     final = (
-        price_momentum * 0.20
-        + relative_volume_score * 0.15
-        + high_gap_score * 0.10
-        + rsi_score * 0.10
-        + fundamentals * 0.15
-        + equity_score * 0.10
+        price_momentum * 0.18
+        + relative_volume_score * 0.12
+        + high_gap_score * 0.08
+        + rsi_component * 0.08
+        + fundamentals * 0.14
+        + equity_component * 0.10
         + alpha_quality * 0.10
-        + sentiment_score * 0.10
+        + risk_quality * 0.10
+        + sentiment_component * 0.10
     )
 
     return {
         "price_momentum_score": round(price_momentum, 1),
         "volume_score": round(relative_volume_score, 1),
         "high_gap_score": round(high_gap_score, 1),
-        "rsi_score": round(rsi_score, 1),
+        "rsi_score": round(rsi_component, 1),
         "fundamental_score": round(fundamentals, 1),
-        "equity_score": round(equity_score, 1),
+        "equity_score": round(equity_component, 1),
         "alpha_quality_score": round(alpha_quality, 1),
-        "sentiment_component_score": round(sentiment_score, 1),
+        "risk_quality_score": round(risk_quality, 1),
+        "sentiment_component_score": round(sentiment_component, 1),
         "momentum_quality_score": round(final, 1),
     }
 
@@ -157,6 +216,7 @@ def compute_metrics(
     benchmark_prices: pd.DataFrame,
     fundamentals: Dict,
     sentiment_score: float = 0.0,
+    risk_free_rate: float = 0.04,
 ) -> Dict:
     df = prices.copy().sort_index()
     close = df["close"]
@@ -180,6 +240,9 @@ def compute_metrics(
         "consecutive_up_days": consecutive_up_days(close),
         "rsi": rsi(close),
         "win_rate_252D": win_rate(close, 252),
+        "beta_1Y": beta_vs_benchmark(close, benchmark_close, 252),
+        "sharpe_1Y": sharpe_ratio(close, risk_free_rate, 252),
+        "volatility_1Y_pct": annualized_volatility(close, 252),
         "sentiment_score": sentiment_score,
         **fundamentals,
     }
