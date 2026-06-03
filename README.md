@@ -1,64 +1,43 @@
-# Momentum Quality Scanner MVP
+# Momentum Quality Scanner MVP — Phase 2 Live Data
 
-A fast MVP for screening shares using:
+A Streamlit app for screening US and UK shares using momentum, volume, fundamentals, alpha, beta, Sharpe ratio, volatility, RSI and 52-week-high proximity.
 
-- Consecutive up days
-- Relative volume
-- 52-week high proximity
-- RSI
-- EPS positivity and EPS growth
-- Positive P/E
-- Positive and rising shareholder equity / net assets
-- Multi-timeframe returns
-- Alpha vs benchmark
-- Win rate
-- Beta vs benchmark
-- Sharpe ratio
-- Annualized volatility
-- News sentiment score
+## Phase 2 upgrade
+
+This version uses a free-first live data approach:
+
+- Yahoo Finance via `yfinance`
+- US and UK stock support
+- S&P 500 benchmark for US stocks: `^GSPC`
+- FTSE 100 benchmark for UK stocks: `^FTSE`
+- Streamlit caching to reduce rate-limit problems
+
+## Files
+
+- `app.py` — Streamlit app
+- `data_provider.py` — Yahoo Finance live data connector
+- `scoring.py` — scoring and risk-adjusted calculations
+- `sample_data.py` — fallback demo data
+- `requirements.txt` — Python packages
+- `Momentum_Quality_App_MVP.ipynb` — GitHub notebook overview
 
 ## Run locally
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Files
+## Deploy on Streamlit Cloud
 
-- `app.py` — Streamlit user interface
-- `scoring.py` — all calculations and scoring logic, including beta and Sharpe ratio
-- `sample_data.py` — realistic sample stock universe
-- `requirements.txt` — dependencies
-- `Momentum_Quality_App_MVP.ipynb` — notebook version for GitHub preview
+Use:
 
-## Key formulas
+```text
+Main file path: app.py
+```
 
-- Beta = covariance(stock daily returns, benchmark daily returns) / variance(benchmark daily returns)
-- Sharpe ratio = annualized excess return / annualized volatility
-- Alpha = stock return - benchmark return
-- Relative volume = latest volume / 30-day average volume
+## Notes
 
-## Next development step
+Free APIs can be delayed, rate-limited or incomplete. This app uses caching and smaller stock universes to keep the MVP practical.
 
-Replace `sample_data.py` with real data connectors:
-
-1. Daily prices and volume
-2. Fundamentals: EPS, P/E, shareholder equity
-3. Benchmark index prices
-4. News and sentiment
-
-## Suggested production architecture
-
-- Frontend: React / Next.js or Streamlit for early users
-- Backend: FastAPI
-- Database: PostgreSQL
-- Jobs: Cron, Celery, or Airflow
-- Hosting: Render, AWS, Railway, or Azure
-- Alerts: email, Telegram, WhatsApp, or push notifications
-
-## Disclaimer
-
-This tool is for screening and research only. It is not financial advice.
+This is a decision-support screener only. It does not guarantee investment returns or provide personal financial advice.
